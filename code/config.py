@@ -21,7 +21,7 @@ class Config_MBM_EEG(Config_MAE_fMRI):
         self.clip_grad = 0.8
         
         # Model Parameters
-        self.mask_ratio = 0.1
+        self.mask_ratio = 0#0.75
         self.patch_size = 4 #  1
         self.embed_dim = 1024 #256 # has to be a multiple of num_heads
         self.decoder_embed_dim = 512 #128
@@ -31,8 +31,8 @@ class Config_MBM_EEG(Config_MAE_fMRI):
         self.mlp_ratio = 1.0
 
         # Project setting
-        self.root_path = '../dreamdiffusion/'
-        self.output_path = '../dreamdiffusion/exps/'
+        self.root_path = '../DreamDiffusion/'
+        self.output_path = '../DreamDiffusion/exps/'
         self.seed = 2022
         self.roi = 'VC'
         self.aug_times = 1
@@ -54,15 +54,15 @@ class Config_EEG_finetune(Config_MBM_finetune):
     def __init__(self):
         
         # Project setting
-        self.root_path = '../dreamdiffusion/'
+        self.root_path = '../DreamDiffusion/'
         # self.root_path = '.'
-        self.output_path = '../dreamdiffusion/exps/'
+        self.output_path = '../DreamDiffusion/exps/'
 
         self.eeg_signals_path = os.path.join(self.root_path, 'datasets/eeg_5_95_std.pth')
         self.splits_path = os.path.join(self.root_path, 'datasets/block_splits_by_image_all.pth')
 
         self.dataset = 'EEG' 
-        self.pretrain_mbm_path = '../dreamdiffusion/pretrains/eeg_pretrain/checkpoint.pth' 
+        self.pretrain_mbm_path = '../DreamDiffusion/pretrains/eeg_pretrain/checkpoint.pth' 
 
         self.include_nonavg_test = True
 
@@ -89,8 +89,8 @@ class Config_Generative_Model:
     def __init__(self):
         # project parameters
         self.seed = 2022
-        self.root_path = '../dreamdiffusion/'
-        self.output_path = '../dreamdiffusion/exps/'
+        self.root_path = '../DreamDiffusion/'
+        self.output_path = '../DreamDiffusion/exps/'
 
         self.eeg_signals_path = os.path.join(self.root_path, 'datasets/eeg_5_95_std.pth')
         self.splits_path = os.path.join(self.root_path, 'datasets/block_splits_by_image_single.pth')
@@ -139,8 +139,8 @@ class Config_Cls_Model:
     def __init__(self):
         # project parameters
         self.seed = 2022
-        self.root_path = '../dreamdiffusion/'
-        self.output_path = '../dreamdiffusion/exps/'
+        self.root_path = '../DreamDiffusion/'
+        self.output_path = '../DreamDiffusion/exps/'
 
         # self.eeg_signals_path = os.path.join(self.root_path, 'datasets/eeg_5_95_std.pth')
         self.eeg_signals_path = os.path.join(self.root_path, 'datasets/eeg_14_70_std.pth')

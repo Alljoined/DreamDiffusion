@@ -10,13 +10,15 @@ import datetime
 import matplotlib.pyplot as plt
 import wandb
 import copy
+from accelerate import Accelerator
 
 from config import Config_MBM_EEG
 from dataset import eeg_pretrain_dataset
 from sc_mbm.mae_for_eeg import MAEforEEG
-from sc_mbm.trainer import train_one_epoch
+from sc_mbm.trainer import train_one_epoch_accelerate
 from sc_mbm.trainer import NativeScalerWithGradNormCount as NativeScaler
 from sc_mbm.utils import save_model
+
 
 os.environ["WANDB_START_METHOD"] = "thread"
 os.environ['WANDB_DIR'] = "."
@@ -102,21 +104,22 @@ def fmri_transform(x, sparse_rate=0.2):
     return torch.FloatTensor(x_aug)
 
 def main(config):
+    accelerator = Accelerator()
     print('num of gpu:')
     print(torch.cuda.device_count())
-    if torch.cuda.device_count() > 1:
-        torch.cuda.set_device(config.local_rank) 
-        torch.distributed.init_process_group(backend='nccl')#, world_size=2)
+    # if torch.cuda.device_count() > 1:
+    #     torch.cuda.set_device(config.local_rank) 
+    #     torch.distributed.init_process_group(backend='nccl')#, world_size=2)
     output_path = os.path.join(config.root_path, 'results', 'eeg_pretrain',  '%s'%(datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S")))
     config.output_path = output_path
     # logger = wandb_logger(config) if config.local_rank == 0 else None
     logger = None
     
-    if config.local_rank == 0:
+    if accelerator.is_main_process:
         os.makedirs(output_path, exist_ok=True)
         create_readme(config, output_path)
     
-    device = torch.device(f'cuda:{config.local_rank}') if torch.cuda.is_available() else torch.device('cpu')
+    # device = torch.device(f'cuda:{config.local_rank}') if torch.cuda.is_available() else torch.device('cpu')
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
 
@@ -127,10 +130,12 @@ def main(config):
                 include_kam=config.include_kam, include_hcp=config.include_hcp)
    
     print(f'Dataset size: {len(dataset_pretrain)}\n Time len: {dataset_pretrain.data_len}')
-    sampler = torch.utils.data.DistributedSampler(dataset_pretrain, rank=config.local_rank) if torch.cuda.device_count() > 1 else None 
+    # sampler = torch.utils.data.DistributedSampler(dataset_pretrain, rank=config.local_rank) if torch.cuda.device_count() > 1 else None 
 
-    dataloader_eeg = DataLoader(dataset_pretrain, batch_size=config.batch_size, sampler=sampler, 
-                shuffle=(sampler is None), pin_memory=True)
+    # dataloader_eeg = DataLoader(dataset_pretrain, batch_size=config.batch_size, sampler=sampler, 
+    #             shuffle=(sampler is None), pin_memory=True)
+    dataloader_eeg = DataLoader(dataset_pretrain, batch_size=config.batch_size, shuffle=True, pin_memory=True)
+    dataloader_eeg = accelerator.prepare(dataloader_eeg)
 
     # create model
     config.time_len=dataset_pretrain.data_len
@@ -139,15 +144,18 @@ def main(config):
                     num_heads=config.num_heads, decoder_num_heads=config.decoder_num_heads, mlp_ratio=config.mlp_ratio,
                     focus_range=config.focus_range, focus_rate=config.focus_rate, 
                     img_recon_weight=config.img_recon_weight, use_nature_img_loss=config.use_nature_img_loss)   
-    model.to(device)
+    # model.to(device)
     model_without_ddp = model
-    if torch.cuda.device_count() > 1:
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-        model = DistributedDataParallel(model, device_ids=[config.local_rank], output_device=config.local_rank, find_unused_parameters=config.use_nature_img_loss)
+    # if torch.cuda.device_count() > 1:
+    #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    #     model = DistributedDataParallel(model, device_ids=[config.local_rank], output_device=config.local_rank, find_unused_parameters=config.use_nature_img_loss)
 
     param_groups = optim_factory.add_weight_decay(model, config.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=config.lr, betas=(0.9, 0.95))
     print(optimizer)
+
+    model, optimizer = accelerator.prepare(model, optimizer)
+
     loss_scaler = NativeScaler()
 
     if logger is not None:
@@ -164,26 +172,29 @@ def main(config):
         weights = ResNet50_Weights.DEFAULT
         preprocess = weights.transforms()
         m = resnet50(weights=weights)   
-        img_feature_extractor = create_feature_extractor(m, return_nodes={f'layer2': 'layer2'}).to(device).eval()
+        img_feature_extractor = create_feature_extractor(m, return_nodes={f'layer2': 'layer2'}).eval()
+        #img_feature_extractor = create_feature_extractor(m, return_nodes={f'layer2': 'layer2'}).to(device).eval()
         for param in img_feature_extractor.parameters():
             param.requires_grad = False
 
-    for ep in range(config.num_epoch):
-        
-        if torch.cuda.device_count() > 1: 
-            sampler.set_epoch(ep) # to shuffle the data at every epoch
-        cor = train_one_epoch(model, dataloader_eeg, optimizer, device, ep, loss_scaler, logger, config, start_time, model_without_ddp,
+    for epoch in range(config.num_epoch):
+        # model.train()
+        # if torch.cuda.device_count() > 1: 
+        #     sampler.set_epoch(epoch) # to shuffle the data at every epoch
+        cor = train_one_epoch_accelerate(accelerator, model, dataloader_eeg, optimizer, epoch, loss_scaler, logger, config, start_time, model_without_ddp,
                             img_feature_extractor, preprocess)
         cor_list.append(cor)
-        print("Epoch: " + str(ep))
-        if (ep % 3 == 0 or ep + 1 == config.num_epoch) and config.local_rank == 0: #and ep != 0
-            print("Printing plot for epoch: " + str(ep))
-            # save models
-        # if True:
-            save_model(config, ep, model_without_ddp, optimizer, loss_scaler, os.path.join(output_path,'checkpoints'))
-            # plot figures
-            plot_recon_figures(model, device, dataset_pretrain, output_path, 5, config, logger, model_without_ddp)
-            
+
+        if accelerator.is_main_process:
+            if (epoch % 20 == 0 or epoch + 1 == config.num_epoch): #and epoch != 0
+            # if True:
+                # save models
+                print(f"Epoch: {epoch}")
+                save_model(config, epoch, model_without_ddp, optimizer, loss_scaler, os.path.join(output_path,'checkpoints'))
+                # plot figures
+                plot_recon_figures(model, dataset_pretrain, output_path, 5, config, logger, model_without_ddp)
+
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
@@ -193,7 +204,7 @@ def main(config):
     return
 
 @torch.no_grad()
-def plot_recon_figures(model, device, dataset, output_path, num_figures = 5, config=None, logger=None, model_without_ddp=None):
+def plot_recon_figures(model, dataset, output_path, num_figures = 5, config=None, logger=None, model_without_ddp=None):
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
     model.eval()
     fig, axs = plt.subplots(num_figures, 3, figsize=(30,15))
@@ -204,15 +215,12 @@ def plot_recon_figures(model, device, dataset, output_path, num_figures = 5, con
 
     for ax in axs:
         sample = next(iter(dataloader))['eeg']
-        sample = sample.to(device)
+        # sample = sample.to(device)
         _, pred, mask = model(sample, mask_ratio=config.mask_ratio)
         # sample_with_mask = model_without_ddp.patchify(sample.transpose(1,2))[0].to('cpu').numpy().reshape(-1, model_without_ddp.patch_size)
-        sample_with_mask = sample.to('cpu').squeeze(0)[0].numpy().reshape(-1, model_without_ddp.patch_size)
-        # pred = model_without_ddp.unpatchify(pred.transpose(1,2)).to('cpu').squeeze(0)[0].unsqueeze(0).numpy()
-        # sample = sample.to('cpu').squeeze(0)[0].unsqueeze(0).numpy()
+        sample_with_mask = sample.squeeze(0)[0].numpy().reshape(-1, model_without_ddp.patch_size)
         pred = model_without_ddp.unpatchify(pred).to('cpu').squeeze(0)[0].numpy()
-        # pred = model_without_ddp.unpatchify(model_without_ddp.patchify(sample.transpose(1,2))).to('cpu').squeeze(0)[0].numpy()
-        sample = sample.to('cpu').squeeze(0)[0].numpy()
+        sample = sample.squeeze(0)[0].numpy()
         mask = mask.to('cpu').numpy().reshape(-1)
 
         cor = np.corrcoef([pred, sample])[0,1]
@@ -239,7 +247,7 @@ def plot_recon_figures(model, device, dataset, output_path, num_figures = 5, con
 
 
 @torch.no_grad()
-def plot_recon_figures2(model, device, dataset, output_path, num_figures = 5, config=None, logger=None, model_without_ddp=None):
+def plot_recon_figures2(model, dataset, output_path, num_figures = 5, config=None, logger=None, model_without_ddp=None):
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
     model.eval()
     fig, axs = plt.subplots(num_figures, 2, figsize=(20,15))
@@ -250,15 +258,13 @@ def plot_recon_figures2(model, device, dataset, output_path, num_figures = 5, co
 
     for ax in axs:
         sample = next(iter(dataloader))['eeg']
-        sample = sample.to(device)
+        # sample = sample.to(device)
         _, pred, mask = model(sample, mask_ratio=config.mask_ratio)
         # sample_with_mask = model_without_ddp.patchify(sample.transpose(1,2))[0].to('cpu').numpy().reshape(-1, model_without_ddp.patch_size)
-        sample_with_mask = sample.to('cpu').squeeze(0)[0].numpy().reshape(-1, model_without_ddp.patch_size)
-        # pred = model_without_ddp.unpatchify(pred.transpose(1,2)).to('cpu').squeeze(0)[0].unsqueeze(0).numpy()
-        # sample = sample.to('cpu').squeeze(0)[0].unsqueeze(0).numpy()
-        pred = model_without_ddp.unpatchify(pred).to('cpu').squeeze(0)[0].numpy()
-        # pred = model_without_ddp.unpatchify(model_without_ddp.patchify(sample.transpose(1,2))).to('cpu').squeeze(0)[0].numpy()
-        sample = sample.to('cpu').squeeze(0)[0].numpy()
+        sample_with_mask = sample.squeeze(0)[0].numpy().reshape(-1, model_without_ddp.patch_size)
+        pred = model_without_ddp.unpatchify(pred).squeeze(0)[0].numpy()
+        sample = sample.squeeze(0)[0].numpy()
+
         cor = np.corrcoef([pred, sample])[0,1]
 
         x_axis = np.arange(0, sample.shape[-1])

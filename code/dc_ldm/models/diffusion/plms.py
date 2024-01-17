@@ -6,7 +6,7 @@ from tqdm import tqdm
 from functools import partial
 
 from dc_ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, make_ddim_timesteps, noise_like
-
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class PLMSSampler(object):
     def __init__(self, model, schedule="linear", **kwargs):

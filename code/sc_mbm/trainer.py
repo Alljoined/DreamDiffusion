@@ -1,7 +1,7 @@
 import math, sys
 import torch
 import sc_mbm.utils as ut
-from torch._six import inf
+from torch import inf
 import numpy as np
 import time
 
@@ -47,6 +47,70 @@ def get_grad_norm_(parameters, norm_type: float = 2.0):
     else:
         total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
     return total_norm
+
+from accelerate import Accelerator
+def train_one_epoch_accelerate(accelerator, model, data_loader, optimizer, epoch, 
+                        loss_scaler, log_writer=None, config=None, start_time=None, model_without_ddp=None, 
+                        img_feature_extractor=None, preprocess=None):
+    model.train(True)
+    optimizer.zero_grad()
+    total_loss = []
+    total_cor = []
+    accum_iter = config.accum_iter
+    step_count = 0
+
+    for data_iter_step, data_dict in enumerate(data_loader):
+        if data_iter_step % accum_iter == 0:
+            ut.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, config)
+        
+        samples = data_dict['eeg'].to(accelerator.device)
+        img_features = None
+        valid_idx = None
+        if img_feature_extractor is not None:
+            images = data_dict['image']
+            valid_idx = torch.nonzero(images.sum(dim=(1,2,3)) != 0).squeeze(1)
+            img_feature_extractor.eval()
+            with torch.no_grad():
+                img_features = img_feature_extractor(preprocess(images[valid_idx]).to(accelerator.device))['layer2']
+        
+        optimizer.zero_grad()
+
+        with accelerator.autocast():
+            loss, pred, _ = model(samples, img_features, valid_idx=valid_idx, mask_ratio=config.mask_ratio)
+
+        loss_value = loss.item()
+        if not math.isfinite(loss_value):
+            print(f"Loss is {loss_value}, stopping training")
+            sys.exit(1)
+
+        # loss_scaler(loss, optimizer, parameters=model.parameters(), clip_grad = config.clip_grad)
+        accelerator.backward(loss)
+        optimizer.step()
+
+        pred = pred.detach().to('cpu')
+        samples = samples.detach().to('cpu')
+        pred = model_without_ddp.unpatchify(pred)
+
+        cor = torch.mean(torch.tensor([torch.corrcoef(torch.cat([p[0].unsqueeze(0), s[0].unsqueeze(0)],axis=0))[0,1] for p, s in zip(pred, samples)])).item()
+
+        total_loss.append(loss_value)
+        total_cor.append(cor)
+
+        if accelerator.is_main_process:
+            lr = optimizer.param_groups[0]["lr"]
+            print('train_loss_step:', np.mean(total_loss), 'lr:', lr, 'cor', np.mean(total_cor))
+
+    if log_writer is not None and accelerator.is_main_process:
+        lr = optimizer.param_groups[0]["lr"]
+        log_writer.log('train_loss_step', np.mean(total_loss), step=epoch)
+        log_writer.log('lr', lr, step=epoch)
+        log_writer.log('cor', np.mean(total_cor), step=epoch)
+        if start_time is not None:
+            log_writer.log('time (min)', (time.time() - start_time)/60.0, step=epoch)
+    if accelerator.is_main_process:#config.local_rank == 0:        
+        print(f'[Epoch {epoch}] loss: {np.mean(total_loss)}')
+
+    return np.mean(total_cor)        
 
 
 def train_one_epoch(model, data_loader, optimizer, device, epoch, 
@@ -113,9 +177,10 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
 
         total_loss.append(loss_value)
         total_cor.append(cor)
-        if device == torch.device('cuda:0'):
+        if device == torch.device(f'cuda:{config.local_rank}'):
             lr = optimizer.param_groups[0]["lr"]
-            print('train_loss_step:', np.mean(total_loss), 'lr:', lr, 'cor', np.mean(total_cor))
+            if data_iter_step % 50 == 0:
+                print('train_loss_step:', np.mean(total_loss), 'lr:', lr, 'cor', np.mean(total_cor))
 
     if log_writer is not None:
         lr = optimizer.param_groups[0]["lr"]

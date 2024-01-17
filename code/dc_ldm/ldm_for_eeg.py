@@ -1,5 +1,6 @@
 import numpy as np
 import wandb
+import json
 import torch
 from dc_ldm.util import instantiate_from_config
 from omegaconf import OmegaConf
@@ -30,9 +31,10 @@ class cond_stage_model(nn.Module):
     def __init__(self, metafile, num_voxels=440, cond_dim=1280, global_pool=True, clip_tune = True, cls_tune = False):
         super().__init__()
         # prepare pretrained fmri mae 
-        if metafile is not None:
+        # TODO: original was is not None
+        if metafile is None:
+            print("Shape: ", len(metafile))
             model = create_model_from_config(metafile['config'], num_voxels, global_pool)
-        
             model.load_checkpoint(metafile['model'])
         else:
             model = eeg_encoder(time_len=num_voxels, global_pool=global_pool)
