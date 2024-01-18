@@ -121,7 +121,7 @@ def main(config):
     np.random.seed(config.seed)
 
     # create dataset and dataloader
-    dataset_pretrain = eeg_pretrain_dataset(path='../dreamdiffusion/datasets/mne_data/', roi=config.roi, patch_size=config.patch_size,
+    dataset_pretrain = eeg_pretrain_dataset(path='/srv/eeg_reconstruction/shared/DreamDiffusion/datasets/zhou2016_split', roi=config.roi, patch_size=config.patch_size,
                 transform=fmri_transform, aug_times=config.aug_times, num_sub_limit=config.num_sub_limit, 
                 include_kam=config.include_kam, include_hcp=config.include_hcp)
    
@@ -140,6 +140,8 @@ def main(config):
                     img_recon_weight=config.img_recon_weight, use_nature_img_loss=config.use_nature_img_loss)   
     model.to(device)
     model_without_ddp = model
+    print("model params")
+    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
     if torch.cuda.device_count() > 1:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         model = DistributedDataParallel(model, device_ids=[config.local_rank], output_device=config.local_rank, find_unused_parameters=config.use_nature_img_loss)
@@ -174,8 +176,9 @@ def main(config):
         cor = train_one_epoch(model, dataloader_eeg, optimizer, device, ep, loss_scaler, logger, config, start_time, model_without_ddp,
                             img_feature_extractor, preprocess)
         cor_list.append(cor)
-        if (ep % 20 == 0 or ep + 1 == config.num_epoch) and config.local_rank == 0: #and ep != 0
-            # save models
+        print("Epoch: " + str(ep))
+        if (ep % 3 == 0 or ep + 1 == config.num_epoch) and config.local_rank == 0: #and ep != 0
+            print("Printing plot for epoch: " + str(ep))
         # if True:
             save_model(config, ep, model_without_ddp, optimizer, loss_scaler, os.path.join(output_path,'checkpoints'))
             # plot figures

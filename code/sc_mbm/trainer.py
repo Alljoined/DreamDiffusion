@@ -1,7 +1,7 @@
 import math, sys
 import torch
 import sc_mbm.utils as ut
-from torch._six import inf
+from torch import inf
 import numpy as np
 import time
 
@@ -115,7 +115,8 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
         total_cor.append(cor)
         if device == torch.device('cuda:0'):
             lr = optimizer.param_groups[0]["lr"]
-            print('train_loss_step:', np.mean(total_loss), 'lr:', lr, 'cor', np.mean(total_cor))
+            if data_iter_step % 25 == 0:
+                print('train_loss_step:', np.mean(total_loss), 'lr:', lr, 'cor', np.mean(total_cor))
 
     if log_writer is not None:
         lr = optimizer.param_groups[0]["lr"]
