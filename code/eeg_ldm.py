@@ -120,6 +120,7 @@ def fmri_transform(x, sparse_rate=0.2):
 def main(config):
     # project setup
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    torch.set_float32_matmul_precision('medium')
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
 
