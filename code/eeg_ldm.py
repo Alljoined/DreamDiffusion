@@ -223,7 +223,7 @@ def create_trainer(num_epoch, precision=32, accumulate_grad_batches=2,logger=Non
     return pl.Trainer(accelerator=acc, max_epochs=num_epoch, logger=logger, 
             precision=precision, accumulate_grad_batches=accumulate_grad_batches,
             enable_checkpointing=False, enable_model_summary=False, gradient_clip_val=0.5,
-            check_val_every_n_epoch=check_val_every_n_epoch)
+            check_val_every_n_epoch=check_val_every_n_epoch, devices=1)
   
 if __name__ == '__main__':
     args = get_args_parser()
@@ -244,6 +244,6 @@ if __name__ == '__main__':
     
     wandb_init(config, output_path)
 
-    # logger = WandbLogger()
-    config.logger = None # logger
+    logger = WandbLogger()
+    config.logger = logger
     main(config)

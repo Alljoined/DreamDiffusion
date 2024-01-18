@@ -19,4 +19,6 @@ alstons_code/processed
 alstons_code/bnci2014_001.npy
 alstons_code/zhou2016.npy
 
+wandb
+
 *.pyc

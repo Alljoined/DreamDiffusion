@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from sc_mbm.mae_for_eeg import eeg_encoder, classify_network, mapping 
 from PIL import Image
+
 def create_model_from_config(config, num_voxels, global_pool):
     model = eeg_encoder(time_len=num_voxels, patch_size=config.patch_size, embed_dim=config.embed_dim,
                 depth=config.depth, num_heads=config.num_heads, mlp_ratio=config.mlp_ratio, global_pool=global_pool) 
@@ -137,7 +138,7 @@ class eLDM:
     def finetune(self, trainers, dataset, test_dataset, bs1, lr1,
                 output_path, config=None):
         config.trainer = None
-        config.logger = None
+        # config.logger = None
         self.model.main_config = config
         self.model.output_path = output_path
         # self.model.train_dataset = dataset
@@ -148,17 +149,25 @@ class eLDM:
         print('\n##### Stage One: only optimize conditional encoders #####')
         dataloader = DataLoader(dataset, batch_size=bs1, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=bs1, shuffle=False)
+
+        print("Data loaded. Starting to freeze/unfreeze")
         self.model.unfreeze_whole_model()
         self.model.freeze_first_stage()
+
+        
         # self.model.freeze_whole_model()
         # self.model.unfreeze_cond_stage()
 
         self.model.learning_rate = lr1
         self.model.train_cond_stage_only = True
         self.model.eval_avg = config.eval_avg
+        
+
         trainers.fit(self.model, dataloader, val_dataloaders=test_loader)
 
         self.model.unfreeze_whole_model()
+        
+        config.logger.experiment.unwatch()
         
         torch.save(
             {
