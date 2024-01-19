@@ -291,7 +291,8 @@ class EEGDataset_s(Dataset):
         # Process EEG
         eeg = self.data[i]["eeg"].float().t()
 
-        eeg = eeg[20:460,:]
+        # Charles: Removing this cropping (done in preprocessing)
+        # eeg = eeg[20:460,:]
 
         # Get label
         image_name = self.images[self.data[i]["image"]]
@@ -317,6 +318,7 @@ class EEGDataset(Dataset):
         self.labels = loaded["labels"]
         self.images = loaded["images"]
         self.imagenet = 'datasets/imageNet_images/'
+        # xxxChanges self.imagenet = 'datasets/coco/'
         self.image_transform = image_transform
         self.num_voxels = 440
         self.data_len = 512
@@ -334,7 +336,8 @@ class EEGDataset(Dataset):
         # print(self.data[i])
         eeg = self.data[i]["eeg"].float().t()
 
-        eeg = eeg[20:460,:]
+        # Charles: Removing this cropping (done in preprocessing)
+        # eeg = eeg[20:460,:]
         ##### 2023 2 13 add preprocess and transpose
         eeg = np.array(eeg.transpose(0,1))
         x = np.linspace(0, 1, eeg.shape[-1])
@@ -343,11 +346,13 @@ class EEGDataset(Dataset):
         eeg = f(x2)
         eeg = torch.from_numpy(eeg).float()
         ##### 2023 2 13 add preprocess
+        ### label is an integer from 1 to 40
         label = torch.tensor(self.data[i]["label"]).long()
 
         # Get label
         image_name = self.images[self.data[i]["image"]]
         image_path = os.path.join(self.imagenet, image_name.split('_')[0], image_name+'.JPEG')
+        # xxxChanges image_path = os.path.join(self.imagenet, image_name)
         # print(image_path)
         image_raw = Image.open(image_path).convert('RGB') 
         

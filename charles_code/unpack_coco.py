@@ -21,7 +21,7 @@ def read_and_save_images(mat_file_path, output_dir):
         # Convert the image data to a format suitable for saving (if necessary)
         # Assuming the image is in the format (224, 224, 3)
         if img.shape != (224, 224, 3):
-            raise ValueError(f"Image {i} is not in the expected format")
+            raise ValueError(f"Image {i+1} is not in the expected format")
 
         # Convert the image data to uint8 if it's not already
         if img.dtype != np.uint8:
@@ -31,9 +31,9 @@ def read_and_save_images(mat_file_path, output_dir):
         image = Image.fromarray(img)
 
         # Save the image
-        image.save(os.path.join(output_dir, f"{i}.png"))
+        image.save(os.path.join(output_dir, f"{i+1}.png"))
 
 # Example usage
 mat_file_path = './datasets/coco_file_224_shared.mat' 
-output_dir = './datasets/coco'
+output_dir = './datasets/coco_images'
 read_and_save_images(mat_file_path, output_dir)

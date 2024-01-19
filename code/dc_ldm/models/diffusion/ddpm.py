@@ -1028,6 +1028,7 @@ class LatentDiffusion(DDPM):
         self.freeze_first_stage()
         # print('share step\'s get input')
         x, c, label, image_raw = self.get_input(batch, self.first_stage_key)
+        # print("shared_step:", label)
         # print('get input shape')
         # print('x.shape')
         # print(x.shape)
@@ -1041,6 +1042,8 @@ class LatentDiffusion(DDPM):
             return loss
 
     def forward(self, x, c, label, image_raw, *args, **kwargs):
+        # print("forward label:", label)        
+
         # print(self.num_timesteps)
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
         # print('t.shape')
